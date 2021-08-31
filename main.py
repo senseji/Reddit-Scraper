@@ -1,83 +1,85 @@
+import enum
 import praw
 from psaw import PushshiftAPI
 import pandas as pd
 from reddit_settings import getReddit
 import datetime as dt
-import pprint
 import json
+import pprint
+import os
 
-def comments_to_dicts(comments):
+try:
+    os.mkdir('output')
+except Exception as e:
+    pass
 
-    results = []  # create list for results
+def get_comments_df(comments):
+
+    results_df = pd.DataFrame()  # create list for results
+    reply_df = pd.DataFrame()
+
     for comment in comments:  # iterate over comments
         try:
             username = comment.author.name
+            
         except :
             username =""
-
+        
         item = { #check https://praw.readthedocs.io/en/latest/code_overview/models/comment.html for info about this
             "author": username,
             "body": comment.body,
             "body_html": comment.body_html,
             "created_utc":comment.created_utc,
-            "distinguished":comment.distinguished,
-            "edited":comment.edited,
             "id":comment.id,
             "is_submitter":comment.is_submitter,
             "link_id": comment.link_id,
             "parent_id":comment.parent_id,
             "permalink": comment.permalink,
-            "saved": comment.saved,
             "score": comment.score,
-            "stickied": comment.stickied,
             "submission_id": comment.submission.id,
             "subreddit": post.subreddit.display_name,
-
         }  # create dict from comment
+        
+        item_df = pd.Series(item).to_frame()
+        item_df = item_df.T
 
         if len(comment._replies) > 0:
-            item["replies"] = comments_to_dicts(comment._replies)  # convert replies using the same function
+            reply_df = get_comments_df(comment._replies)  # convert replies using the same function
+            item_df = item_df.append(reply_df)
 
-        results.append(item)  # add converted item to results 
-    return results  # return all converted comments
+        results_df=results_df.append(item_df)  # add converted item to results 
 
-def submission_to_dicts(post):
+    return results_df  # return all converted comments
+
+def get_submission_df(post):
     try:
         username = post.author.name
     except :
         username =""
 
+
     item = {
         "author": username,
-        "clicked": post.clicked,
         "created_utc": post.created_utc,
-        "distinguished": post.distinguished,
-        "edited": post.edited,
         "id": post.id,
-        "is_original_content": post.is_original_content,
         "is_self": post.is_self,
-        "link_flair_template_id": post.link_flair_template_id,
-        "link_flair_text": post.link_flair_text,
         "locked": post.locked,
         "name": post.name,
         "num_comments": post.num_comments,
-        "over_18": post.over_18,
         "permalink": post.permalink,
         "saved": post.saved,
         "score": post.score,
         "selftext": post.selftext,
-        "spoiler": post.spoiler,
-        "stickied": post.stickied,
         "subreddit": post.subreddit.display_name,
         "title": post.title,
         "upvote_ratio": post.upvote_ratio,
         "url": post.url,
-
     }
 
-    return item
+    item_df = pd.Series(item).to_frame()
+    item_df = item_df.T
 
-
+    return item_df
 
 start_time=int(dt.datetime(2021,1,1).timestamp())
 end_time=int(dt.datetime(2021,1,2).timestamp())
@@ -89,27 +91,45 @@ submissions_otput_file = 'submissions_output.json'
 comments_output_file = 'comments_output.json'
 
 
-unos = input("Unesi ime subreddita (npr 'learnpython'):")
+unos = "croatia"
 
 subreddit = reddit.subreddit(unos)
 
-posts=list(api.search_submissions(
+
+posts=api.search_submissions(
     after = start_time,
     subreddit = unos,
     limit = 3,
-    sort ="asc",
+    sort ="desc",
     sort_by = "created_utc",
-    #before = end_time,
-    ))
-submissions_dict=[]
-comments_dict=[]
+    before = end_time,
+    )
+
+
+submissions_df=pd.DataFrame()
+
+
 for post in posts:
 
-    submissions_dict.append(submission_to_dicts(post))
-    comments_dict.append(comments_to_dicts(post.comments))
+    comments_df=pd.DataFrame()
+    post_df = get_submission_df(post)
 
-with open(submissions_otput_file, "w") as outfile: 
-    json.dump(submissions_dict, outfile)
+    if submissions_df.empty:
+        submissions_df=post_df
 
-with open(comments_output_file, "w") as outfile: 
-    json.dump(comments_dict, outfile)
+    else:
+        submissions_df=submissions_df.append(post_df)
+
+    comments_df=get_comments_df(post.comments)
+
+    post_id=(post_df.loc[0]["id"])
+
+    filename= "output/comments_for_postid_"+post_id+".csv"
+    comments_df.to_csv(filename, index = False)
+
+submissions_df.to_csv ('output/submissions.csv', index = False)
+
+#with open(submissions_otput_file, "w") as outfile: 
+ #   json.dump(submissions_dict, outfile)
+#with open(comments_output_file, "w") as outfile: 
+   # json.dump(comments_dict, outfile)
