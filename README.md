@@ -10,6 +10,6 @@ Scraper for Reddit, gathering posts and comments, outputting it as .csv files.
 
 ## Preparing the enviroment
 
-1.  '''pip install -r requirements.txt'''
+1.  ```pip install -r requirements.txt```
 2.  In reddit_settings.py, insert your credentials obtained after creating Reddit API token.
 3.  Adjust 'subreddit', 'start_time','end_time' to your liking
