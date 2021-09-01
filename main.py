@@ -7,9 +7,20 @@ import datetime as dt
 import json
 import pprint
 import os
+from tqdm import tqdm
+from datetime import datetime
+import csv
+from matplotlib import pyplot
+
+
 
 try:
     os.mkdir('output')
+except Exception as e:
+    pass
+
+try:
+    os.mkdir('output/comments')
 except Exception as e:
     pass
 
@@ -19,35 +30,39 @@ def get_comments_df(comments):
     reply_df = pd.DataFrame()
 
     for comment in comments:  # iterate over comments
-        try:
-            username = comment.author.name
+    
+        if not(isinstance(comment,praw.models.MoreComments)):
+            try:
+                username = comment.author.name
+                
+            except :
+                username =""
             
-        except :
-            username =""
-        
-        item = { #check https://praw.readthedocs.io/en/latest/code_overview/models/comment.html for info about this
-            "author": username,
-            "body": comment.body,
-            "body_html": comment.body_html,
-            "created_utc":comment.created_utc,
-            "id":comment.id,
-            "is_submitter":comment.is_submitter,
-            "link_id": comment.link_id,
-            "parent_id":comment.parent_id,
-            "permalink": comment.permalink,
-            "score": comment.score,
-            "submission_id": comment.submission.id,
-            "subreddit": post.subreddit.display_name,
-        }  # create dict from comment
-        
-        item_df = pd.Series(item).to_frame()
-        item_df = item_df.T
+            try:
+                body = comment.body
+                
+            except :
+                body =""
+            
+            item = { #check https://praw.readthedocs.io/en/latest/code_overview/models/comment.html for info about this
+                "author": username,
+                "body": body,
+                "id":comment.id,
+                "link_id": comment.link_id,
+                "parent_id":comment.parent_id,
+                "score": comment.score,
+                "submission_id": comment.submission.id,
 
-        if len(comment._replies) > 0:
-            reply_df = get_comments_df(comment._replies)  # convert replies using the same function
-            item_df = item_df.append(reply_df)
+            }  # create dict from comment
+            item["datetime"]=datetime.utcfromtimestamp(post.created_utc).strftime('%Y-%m-%d %H:%M:%S')
+            item_df = pd.Series(item).to_frame()
+            item_df = item_df.T
 
-        results_df=results_df.append(item_df)  # add converted item to results 
+            if len(comment._replies) > 0:
+                reply_df = get_comments_df(comment._replies)  # convert replies using the same function
+                item_df = item_df.append(reply_df)
+
+            results_df=results_df.append(item_df)  # add converted item to results 
 
     return results_df  # return all converted comments
 
@@ -57,32 +72,34 @@ def get_submission_df(post):
     except :
         username =""
 
-
     item = {
         "author": username,
         "created_utc": post.created_utc,
         "id": post.id,
-        "is_self": post.is_self,
-        "locked": post.locked,
         "name": post.name,
         "num_comments": post.num_comments,
-        "permalink": post.permalink,
-        "saved": post.saved,
-        "score": post.score,
         "selftext": post.selftext,
         "subreddit": post.subreddit.display_name,
         "title": post.title,
         "upvote_ratio": post.upvote_ratio,
         "url": post.url,
     }
+    item["datetime"]=datetime.utcfromtimestamp(post.created_utc).strftime('%Y-%m-%d %H:%M:%S')
 
     item_df = pd.Series(item).to_frame()
     item_df = item_df.T
 
     return item_df
 
-start_time=int(dt.datetime(2021,1,1).timestamp())
-end_time=int(dt.datetime(2021,1,2).timestamp())
+start_time=int(dt.datetime(2021,5,31).timestamp())
+end_time=int(dt.datetime(2021,2,1).timestamp())
+keywords=[]
+
+with open('keywords.txt',encoding="utf8") as fd:
+    lines = fd.read().split(',')
+    for line in lines:
+        keywords.append(line.replace(" ","").replace("'",""))
+
 
 reddit = getReddit()
 api = PushshiftAPI(reddit)
@@ -97,20 +114,19 @@ subreddit = reddit.subreddit(unos)
 
 
 posts=api.search_submissions(
-    after = start_time,
+    before = start_time,
     subreddit = unos,
-    limit = 3,
+    limit = 1000,
     sort ="desc",
     sort_by = "created_utc",
-    before = end_time,
+    after = end_time,
     )
 
 
 submissions_df=pd.DataFrame()
+all_comments_df=pd.DataFrame()
 
-
-for post in posts:
-
+for post in tqdm(posts):
     comments_df=pd.DataFrame()
     post_df = get_submission_df(post)
 
@@ -121,15 +137,40 @@ for post in posts:
         submissions_df=submissions_df.append(post_df)
 
     comments_df=get_comments_df(post.comments)
+    try:
+        comments_df["korona_sadrzaj"]=comments_df['body'].apply(lambda x: any([k in x for k in keywords])).astype(int)
+    except:
+        pass
 
+    all_comments_df=all_comments_df.append(comments_df)
     post_id=(post_df.loc[0]["id"])
 
-    filename= "output/comments_for_postid_"+post_id+".csv"
+    filename= "output/comments/comments_for_postid_"+post_id+".csv"
     comments_df.to_csv(filename, index = False)
 
-submissions_df.to_csv ('output/submissions.csv', index = False)
 
-#with open(submissions_otput_file, "w") as outfile: 
- #   json.dump(submissions_dict, outfile)
-#with open(comments_output_file, "w") as outfile: 
-   # json.dump(comments_dict, outfile)
+namebools=submissions_df["name"].apply(lambda x: any([k in x for k in keywords]))
+textbools=submissions_df["selftext"].apply(lambda x: any([k in x for k in keywords]))
+
+submissions_df["korona_sadrzaj"]=(namebools | textbools).astype(int)
+submissions_df["korona_cumsum"]=submissions_df["korona_sadrzaj"].cumsum()
+all_comments_df["korona_cumsum"]=all_comments_df["korona_sadrzaj"].cumsum()
+
+submissions_df.reset_index(drop=True,inplace=True)
+all_comments_df.reset_index(drop=True,inplace=True)
+submissions_df.reset_index(inplace=True)
+all_comments_df.reset_index(inplace=True)
+
+
+all_comments_df.to_csv('output/all_comments.csv', index = False)
+submissions_df.to_csv('output/all_submissions.csv', index = False)
+
+print(submissions_df)
+
+all_comments_df.plot.scatter(x='datetime',y='index')
+all_comments_df.plot.scatter(x='datetime',y='korona_cumsum')
+pyplot.show()
+
+
+
+
